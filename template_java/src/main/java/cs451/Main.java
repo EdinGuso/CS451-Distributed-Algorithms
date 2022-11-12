@@ -88,7 +88,7 @@ public class Main {
         }
 
         //initialize the app
-        app = new Application(hosts, parser.myId(), port, target, num_messages, parser.output());
+        app = new Application(parser.myId(), port, target, num_messages, hosts.size(), parser.output());
 
         //start the app
         app.start();

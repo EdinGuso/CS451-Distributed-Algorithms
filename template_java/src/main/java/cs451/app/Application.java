@@ -24,7 +24,6 @@ public class Application {
     private PerfectLinks lower_layer;
     private LinkedList<MessageZip> incoming;
     private LinkedList<MessageZip> outgoing;
-    private List<Host> hosts;
     private Host target;
     private String output_filename;
     private AtomicBoolean alive;
@@ -32,11 +31,10 @@ public class Application {
     private int capacity;
     private int id;
 
-    public Application(List<Host> hosts, int id, int port, Host target, int num_messages, String output_filename) {
-        this.lower_layer = new PerfectLinks(hosts, id, port, target, this);
+    public Application(int id, int port, Host target, int num_messages, int num_processes, String output_filename) {
+        this.lower_layer = new PerfectLinks(id, port, num_processes, this);
         this.incoming = new LinkedList<MessageZip>();
         this.outgoing = new LinkedList<MessageZip>();
-        this.hosts = hosts;
         this.target = target;
         this.output_filename = output_filename;
         this.alive = new AtomicBoolean(true);

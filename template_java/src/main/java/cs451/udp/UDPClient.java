@@ -95,6 +95,7 @@ public class UDPClient extends Thread {
             System.out.println("CLIENT INTERRUPTED. ID:" + Thread.currentThread().getId());
 		}
         finally {
+            System.out.println("CLIENT STOPPED. ID:" + Thread.currentThread().getId());
             this.queue.clear();
             this.ack_queue.clear();
             System.out.println("Sender queue cleared.");

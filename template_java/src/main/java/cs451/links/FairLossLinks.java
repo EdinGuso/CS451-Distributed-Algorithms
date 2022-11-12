@@ -6,7 +6,6 @@ import cs451.udp.UDPServer;
 import cs451.udp.UDPClient;
 import cs451.util.Message;
 import cs451.util.MessageBatch;
-import cs451.util.MessageZipBatch;
 import cs451.links.StubbornLinks;
 
 /*
@@ -55,7 +54,7 @@ public class FairLossLinks {
         try { this.receiver.join(); } catch (Exception e) { System.out.println("Main got interrupted while waiting for receiver to join."); } //should not happen
     }
 
-    public void deliver (MessageZipBatch batch) {
+    public void deliver (MessageBatch batch) {
         this.upper_layer.deliver(batch);
     }
 }

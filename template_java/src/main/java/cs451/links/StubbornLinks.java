@@ -3,11 +3,8 @@ package cs451.links;
 import java.util.List;
 import java.util.HashMap;
 
-import cs451.Host;
 import cs451.util.Message;
-import cs451.util.MessageZip;
 import cs451.util.MessageBatch;
-import cs451.util.MessageZipBatch;
 import cs451.util.Scheduler;
 import cs451.links.PerfectLinks;
 import cs451.links.FairLossLinks;
@@ -23,25 +20,18 @@ public class StubbornLinks {
     private PerfectLinks upper_layer;
     private FairLossLinks lower_layer;
     private Scheduler scheduler;
-    private HashMap<Integer,Host> hosts_map;
-    private Host sender;
     private int id;
 
-    public StubbornLinks(List<Host> hosts, int id, int port, Host target, PerfectLinks link) {
+    public StubbornLinks(int id, int port, int num_processes, PerfectLinks link) {
         this.upper_layer = link;
         this.lower_layer = new FairLossLinks(port, this);
-        this.scheduler = new Scheduler(target, hosts.size(), this);
-        this.hosts_map = new HashMap<Integer,Host>();
-        for (Host host : hosts) { //maps hosts into a hashmap for efficient search during acknowledgment sending
-            hosts_map.put(host.getId(), host);
-        }
-        this.sender = null;
+        this.scheduler = new Scheduler(num_processes, this);
         this.id = id;
     }
 
     public void send(Message m) {
         this.lower_layer.send(m); //send the message
-        this.scheduler.schedule_message(m); //and schedule it for resending in case ack does not arrive
+        this.scheduler.scheduleMessage(m); //and schedule it for resending in case ack does not arrive
     }
 
     public void retrySend(Message m) {
@@ -64,16 +54,15 @@ public class StubbornLinks {
         this.lower_layer.stop_();
     }
 
-    public void deliver(MessageZipBatch batch) {
-        if (batch.msgs().get(0).getId() == this.id) { //this is an ack
-            for (MessageZip m : batch.msgs()) {
-                scheduler.acknowledge_message(m); //acknowledge that message
+    public void deliver(MessageBatch batch) {
+        if (batch.getId() == this.id) { //this is an ack
+            for (Message m : batch.messages()) {
+                scheduler.acknowledgeMessage(m); //acknowledge that message
             }
         }
         else { //it is not an ack
-            this.sender = this.hosts_map.get(batch.msgs().get(0).getId()); //get the sender
-            this.sendAck(new MessageBatch(batch, this.sender.getIp(), this.sender.getPort())); //send acknowledgment to the original sender
-            for (MessageZip m : batch.msgs()) {
+            this.sendAck(batch); //send acknowledgment to the original sender
+            for (Message m : batch.messages()) {
                 this.upper_layer.deliver(m);
             }
         }

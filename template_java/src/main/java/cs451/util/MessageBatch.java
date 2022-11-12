@@ -1,12 +1,12 @@
 package cs451.util;
 
 import java.util.LinkedList;
+import java.util.Arrays;
 import java.nio.ByteBuffer;
 
 import cs451.Constants;
 import cs451.util.Message;
 import cs451.util.MessageZip;
-import cs451.util.MessageZipBatch;
 
 public class MessageBatch {
 
@@ -20,10 +20,20 @@ public class MessageBatch {
         this.port = 0;
     }
 
-    public MessageBatch(MessageZipBatch batch, String ip, int port) {
-        this.batch = batch.msgs();
-        this.ip = ip;
-        this.port = port;
+    public MessageBatch(byte[] data, String ip, int port) {
+        try {
+            assert data.length == Constants.UDP_PACKET_SIZE; //ensure the given byte array is of allowed size
+            this.batch = new LinkedList<MessageZip>();
+            int num_m = ByteBuffer.wrap(Arrays.copyOfRange(data, 0, 4)).getInt(); //number of messages in the batch
+            for (int i = 0; i < num_m; i++) {
+                this.batch.add(new MessageZip(Arrays.copyOfRange(data, i * Constants.UDP_MESSAGE_SIZE + 4, (i + 1) * Constants.UDP_MESSAGE_SIZE + 4)));
+            }
+            this.ip = ip;
+            this.port = port;
+		}
+        catch (Exception e) {
+			e.printStackTrace();
+		}
     }
 
     public void add(Message m) {
@@ -44,8 +54,16 @@ public class MessageBatch {
         this.batch.clear();
     }
 
-    public LinkedList<MessageZip> msgs() {
+    public LinkedList<MessageZip> messageZips() {
         return this.batch;
+    }
+
+    public LinkedList<Message> messages() {
+        LinkedList<Message> message_batch = new LinkedList<Message>();
+        for (MessageZip m : this.batch) {
+            message_batch.add(new Message(this.ip, this.port, m.getId(), m.getM()));
+        }
+        return message_batch;
     }
 
     public int size() {
@@ -58,6 +76,10 @@ public class MessageBatch {
 
     public int getPort() {
         return this.port;
+    }
+
+    public int getId() {
+        return this.batch.get(0).getId();
     }
 
     public byte[] bytes() {

@@ -25,19 +25,6 @@ public class Message {
 		}
     }
 
-    public Message(byte[] data) {
-        try {
-            assert data.length == Constants.UDP_MESSAGE_SIZE; //ensure the given byte array is of allowed size
-            this.ip = ""; //we don't know the ip by looking at the received data
-            this.port = 0; //we don't know the port by looking at the received data
-            this.id = ByteBuffer.wrap(Arrays.copyOfRange(data, 0, 1)).get();
-            this.m = ByteBuffer.wrap(Arrays.copyOfRange(data, 1, 5)).getInt();
-		}
-        catch (Exception e) {
-			e.printStackTrace();
-		}
-    }
-
     public byte[] bytes() {
         return ByteBuffer.allocate(Constants.UDP_MESSAGE_SIZE).put(this.id).putInt(this.m).array(); //pack the id and message into a byte array
     }
@@ -72,13 +59,14 @@ public class Message {
 
         Message m = (Message) o;
 
-        return this.getId() == m.getId() && this.m == m.getM();
+        return this.getIp().equals(m.getIp()) && this.getPort() == m.getPort() && this.getId() == m.getId() && this.getM() == m.getM();
     }
 
     @Override
     public int hashCode() {
-        //id is in range of 1 - 128
-        return (this.getId() - 1) + (128 * this.m);
+        //id is in range of 1 - 128; port is in range 11001 - 11128
+        //hashcode loops around every 2^17 = 131,072 messages => there should not be collisions
+        return (this.getId() - 1) + (128 * (this.getPort() - 11001)) + (16384 * this.m);
     }
 
 }

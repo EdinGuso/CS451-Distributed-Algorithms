@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import cs451.Host;
 import cs451.Constants;
-import cs451.util.MessageZip;
+import cs451.util.Message;
 import cs451.links.StubbornLinks;
 
 /*
@@ -18,8 +18,7 @@ import cs451.links.StubbornLinks;
 public class Scheduler extends Thread {
 
     private StubbornLinks link;
-    private ConcurrentHashMap<MessageZip, Boolean> map; //ConcurrentHashSet is not implemented in standard Java libraries
-    private Host target;
+    private ConcurrentHashMap<Message, Boolean> map; //ConcurrentHashSet is not implemented in standard Java libraries
     private AtomicInteger num_acks;
     private AtomicInteger rate_limiter;
     private int rate_limiter_local;
@@ -30,10 +29,9 @@ public class Scheduler extends Thread {
     private AtomicBoolean alive;
     private int capacity;
     
-    public Scheduler(Host target, int num_processes, StubbornLinks link) {
+    public Scheduler(int num_processes, StubbornLinks link) {
         this.link = link;
-        this.map = new ConcurrentHashMap<MessageZip, Boolean>(); //use Boolean values to minimize space usage (we are only interested in keys)
-        this.target = target;
+        this.map = new ConcurrentHashMap<Message, Boolean>();
         //params for backoff alg start
         this.num_acks = new AtomicInteger(Constants.SL_HASHSET_SIZE / (2 * num_processes));
         this.rate_limiter = new AtomicInteger(Constants.SL_HASHSET_SIZE / num_processes);
@@ -55,18 +53,18 @@ public class Scheduler extends Thread {
                 this.ratio = Math.min(((double) this.num_acks.getAndSet(0)) / this.rate_limiter.get(), 1); 
                 // sends(t+1) = sends(t) * 0.75 + R * (MAX - 128) * 0.25 + 32; sends(0) = 8192/count(processes); sends = [128, MAX]; where MAX = 8192
                 this.rate_limiter.set(this.rate_limiter.get() * 3 / 4 + ((int) (this.ratio * (Constants.SL_HASHSET_SIZE - 128) / 4)) + 32); 
-                // sleep(t+1) = sleep(t) * 0.75 + (1 - R) * 1800 * 0.25; sleep(0) = 400; sleep = [200, 2000]
+                // sleep(t+1) = sleep(t) * 0.75 + (1 - R) * 1800 * 0.25 + 50; sleep(0) = 400; sleep = [200, 2000]
                 this.sleep_timer = this.sleep_timer * 3 / 4 + (int) ((1.0 - this.ratio) * 450) + 50;
                 // BACKOFF ALGORITHM END
                 // System.out.println("BACKOFF ALG - Ratio: " + this.ratio);
                 // System.out.println("BACKOFF ALG - Rate Limiter: " + this.rate_limiter.get());
                 // System.out.println("BACKOFF ALG - Sleep Timer: " + this.sleep_timer);
                 this.rate_counter = this.rate_limiter.get();
-                for (MessageZip m : this.map.keySet()) { //for every message that did not receive an acknowledgement
+                for (Message m : this.map.keySet()) { //for every message that did not receive an acknowledgement
                     if (!this.alive.get()) break; //if stop_ still hasn't been called
                     if (this.rate_counter == 0) break; //if we exceded our backoff limit
                     if (!this.map.replace(m, false, true)) {
-                        this.link.retrySend(new Message(this.target.getIp(), this.target.getPort(), m.getId(), m.getM())); //send the message to the lower layer
+                        this.link.retrySend(m); //send the message to the lower layer
                         this.rate_counter--;
                     }
                 }
@@ -74,12 +72,13 @@ public class Scheduler extends Thread {
         } catch (Exception e) {
             System.out.println("SCHEDULER INTERRUPTED. ID:" + Thread.currentThread().getId());
         } finally {
+            System.out.println("SCHEDULER STOPPED. ID:" + Thread.currentThread().getId());
             this.map.clear();
             System.out.println("Scheduler hashset stopped and cleared.");
         }
     }
 
-    public void schedule_message(Message m) {
+    public void scheduleMessage(Message m) {
         try {
             if ((this.map.size() >= this.capacity || this.map.size() >= 2 * this.rate_limiter.get())  && this.alive.get()) { //if we don't have space in the allocated memory (this is used to avoid locking the queue unnecessarily)
                 synchronized(this.map) { //we also use rate_limiter here to signal to the app to not oversend (as it gets stuck here)
@@ -91,15 +90,15 @@ public class Scheduler extends Thread {
                 }
             }
             if (this.map.size() < this.capacity) { //if we have capacity
-                this.map.put(new MessageZip(m), false); //add it to the set
+                this.map.put(m, false); //add it to the set
+
             }   
         } catch (Exception e) {
             System.out.println("MAIN INTERRUPTED. ID:" + Thread.currentThread().getId());
         }
-        
     }
 
-    public void acknowledge_message(MessageZip m) {
+    public void acknowledgeMessage(Message m) {
         if (this.map.containsKey(m)) { //if the message has not been acknowledged before
             this.map.remove(m); //acknowledge it
             this.num_acks.getAndIncrement();
