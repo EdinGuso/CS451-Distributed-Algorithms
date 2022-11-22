@@ -2,83 +2,92 @@ package cs451.app;
 
 import java.io.FileWriter;
 import java.io.PrintWriter;
-import java.util.List;
+import java.util.HashMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import cs451.Host;
 import cs451.Constants;
-import cs451.message.MessageZip;
-import cs451.message.MessageInitial;
+import cs451.message.MessageOrigin;
 import cs451.broadcast.FIFOBroadcast;
 
-/* TO EDITTT
- * Implements the wrapper around perfect links that runs everything.
- * Constructs the lower layer and list for storing delivered/sent messages,
- * occasionally logging them to the file and provides functions to
- * upper layer (main) for starting, sending and stopping; as well as
+/*
+ * Implements the wrapper around FIFO Broadcast that runs everything.
+ * Constructs the lower layer and a queue for storing delivered/broadcaster
+ * messages, occasionally logging them to the file and provides functions to
+ * upper layer (main) for starting and stopping; as well as
  * a deliver function to lower layer.
  */
 public class Application {
 
     private FIFOBroadcast lower_layer;
     private ArrayBlockingQueue<String> logs;
+    private PrintWriter writer;
     private String output_filename;
     private int num_messages;
-    private int id;
     private AtomicBoolean alive;
 
-    public Application(Host host, List<Host> hosts, int num_messages, String output_filename) {
-        this.lower_layer = new FIFOBroadcast(host, hosts, this);
+    public Application(HashMap<Byte, Host> hosts_map, Host self, int num_messages, String output_filename) {
+        this.lower_layer = new FIFOBroadcast(hosts_map, self, this);
         this.logs = new ArrayBlockingQueue<String>(Constants.APP_QUEUE_SIZE);
         this.output_filename = output_filename;
         this.num_messages = num_messages;
-        this.id = host.getId();
         this.alive = new AtomicBoolean(true);
     }
 
-    public void broadcast(MessageZip m) {
-        //System.out.println("Broadcasted from APP: (" + m.getOrigin() + "," + m.getM() + ")");
-        if (this.logs.remainingCapacity() < 2) { //if we don't have space in the data structure
-            this.write(); //write the accumulated messages to file
+    /*
+     * Forwards the broadcast signal to lower layer
+     * and writes log when necessary.
+     */
+    public void broadcast(int seq) {
+        while (!this.logs.offer("b " + Integer.toString(seq))) { //while logs are full and we cannot append new strings
+            this.write(); //write logs to the file
         }
-        this.logs.add("b " + Integer.toString(m.getM())); //add a new item to the list to be written
-        this.lower_layer.broadcast(m); //send the message to lower layers
-        
+        this.lower_layer.broadcast(seq);
     }
 
+    /*
+     * Forwards the start signal to lower layer. Keeps sending
+     * broadcast signals untill all are sent or SIGTERM is received.
+     */
     public void start() {
         this.lower_layer.start(); //start the underlying protocols
         for (int i = 1; i <= this.num_messages && this.alive.get(); i++) {
-            this.broadcast(new MessageZip(this.id, this.id, i));
+            this.broadcast(i);
         }
     }
 
+    /*
+     * Prevents future broadcasts. Forwards the stop signal
+     * to lower layer. Writes any remaining items in logs.
+     */
     public void stop_() {
         this.alive.set(false);
-        this.lower_layer.stop_(); //stop the lower layers
-        this.write(); //write all the messages that were not written before
-
+        this.lower_layer.stop_();
+        this.write();
     }
 
-    public void deliver(MessageInitial m) {
-        //System.out.println("Delivered to APP: (" + m.getOrigin() + "," + m.getM() + ")");
-        if (this.logs.remainingCapacity() < 2) { //if we don't have space in the data structure
-            if (this.logs.remainingCapacity() < 2) {
-                this.write(); //write the accumulated messages to file
-            }
+    /*
+     * After receiving deliver signal from lower layer,
+     * to lower layer. Writes any remaining items in logs.
+     */
+    public void deliver(MessageOrigin mo) {
+        while (!this.logs.offer("d " + Integer.toString(mo.getOriginInt()) + " " + Integer.toString(mo.getSeq()))) {
+            this.write();
         }
-        this.logs.add("d " + Integer.toString(m.getOrigin()) + " " + Integer.toString(m.getM())); //add another message to be written later
     }
 
+    /*
+     * Writes the contents of logs into the output file.
+     */
     public void write() {
         try {
-            synchronized (this.logs) {
-                PrintWriter writer = new PrintWriter(new FileWriter(this.output_filename, true)); //open the file
-                while (!this.logs.isEmpty()) { //and there are more messages to be written
-                    writer.println(this.logs.poll()); //write it
+            synchronized (this.logs) { //synchronize since main and deliverer may access concurrently
+                this.writer = new PrintWriter(new FileWriter(this.output_filename, true)); //open the file
+                while (!this.logs.isEmpty()) { //if there are more messages to be written
+                    this.writer.println(this.logs.poll()); //write it
                 }
-                writer.close(); //close the writer
+                this.writer.close(); //close the file
             }
         } catch (Exception e) { e.printStackTrace(); }
     }

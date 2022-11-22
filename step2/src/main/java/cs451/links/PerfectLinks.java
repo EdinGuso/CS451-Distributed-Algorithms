@@ -1,11 +1,11 @@
 package cs451.links;
 
-import java.util.List;
+import java.util.HashMap;
 
 import cs451.Host;
 import cs451.links.StubbornLinks;
 import cs451.message.Message;
-import cs451.message.MessageZip;
+import cs451.message.MessageLocal;
 import cs451.broadcast.BestEffortBroadcast;
 
 // WARNING!: For Project Step 2 implementation, we have scrapped
@@ -23,24 +23,36 @@ public class PerfectLinks {
     private BestEffortBroadcast upper_layer;
     private StubbornLinks lower_layer;
 
-    public PerfectLinks(int id, int port, List<Host> hosts, BestEffortBroadcast beb) {
+    public PerfectLinks(HashMap<Byte, Host> hosts_map, Host self, BestEffortBroadcast beb) {
         this.upper_layer = beb;
-        this.lower_layer = new StubbornLinks(id, port, hosts, this);
+        this.lower_layer = new StubbornLinks(hosts_map, self, this);
     }
 
+    /*
+     * Forwards the send signal to lower layer.
+     */
     public void send(Message m) {
         this.lower_layer.send(m);
     }
 
+    /*
+     * Forwards the start signal to lower layer.
+     */
     public void start() {
         this.lower_layer.start();
     }
 
+    /*
+     * Forwards the stop signal to lower layer.
+     */
     public void stop_() {
         this.lower_layer.stop_();
     }
 
-    public void deliver(MessageZip m) {
-        this.upper_layer.deliver(m); //otherwise deliver it
+    /*
+     * Forwards the deliver signal to upper layer.
+     */
+    public void deliver(MessageLocal ml) {
+        this.upper_layer.deliver(ml); //otherwise deliver it
     }
 }

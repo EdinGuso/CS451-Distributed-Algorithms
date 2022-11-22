@@ -1,85 +1,61 @@
 package cs451.message;
 
-import java.util.LinkedList;
-import java.util.Arrays;
 import java.nio.ByteBuffer;
+import java.util.LinkedList;
 
 import cs451.Constants;
 import cs451.message.Message;
-import cs451.message.MessageZip;
 
+/*
+ * Allows the user to batch messages before placing them on the network.
+ * Important for better utilization of the network bandwidth.
+ */
 public class MessageBatch {
 
-    private LinkedList<MessageZip> batch;
-    private String ip;
-    private int port;
+    private LinkedList<Message> batch;
     
     public MessageBatch() {
-        this.batch = new LinkedList<MessageZip>();
-        this.ip = "";
-        this.port = 0;
+        this.batch = new LinkedList<Message>();
     }
 
-    public MessageBatch(byte[] data, String ip, int port) {
-        try {
-            assert data.length == Constants.UDP_PACKET_SIZE; //ensure the given byte array is of allowed size
-            this.batch = new LinkedList<MessageZip>();
-            int num_m = ByteBuffer.wrap(Arrays.copyOfRange(data, 0, 4)).getInt(); //number of messages in the batch
-            for (int i = 0; i < num_m; i++) {
-                this.batch.add(new MessageZip(Arrays.copyOfRange(data, i * Constants.UDP_MESSAGE_SIZE + 4, (i + 1) * Constants.UDP_MESSAGE_SIZE + 4)));
-            }
-            this.ip = ip;
-            this.port = port;
-		}
-        catch (Exception e) {
-			e.printStackTrace();
-		}
+    public MessageBatch(byte[] data) {
+        this.batch = new LinkedList<Message>();
+        int num_m = ByteBuffer.wrap(data).getInt(0);
+        for (int i = 0; i < num_m; i++) {
+            this.batch.add(new Message(data, i * Constants.UDP_MESSAGE_SIZE + 4));
+        }
     }
 
     public void add(Message m) {
-        if (this.batch.size() == 0) { //if this is the first message of the batch
-            this.ip = m.getIp(); //decide this batch's destination as the first message inserted
-            this.port = m.getPort();
-        }
-        if (!this.isFull()) {
-            this.batch.add(new MessageZip(m));
-        }
+        this.batch.add(m);
     }
 
     public boolean isFull () {
         return this.batch.size() >= Constants.UDP_MESSAGE_LIMIT;
     }
 
+    public boolean isEmpty() {
+        return this.batch.size() == 0;
+    }
+
     public void clear() {
         this.batch.clear();
     }
 
-    public LinkedList<MessageZip> messageZips() {
-        return this.batch;
-    }
-
     public LinkedList<Message> messages() {
-        LinkedList<Message> message_batch = new LinkedList<Message>();
-        for (MessageZip m : this.batch) {
-            message_batch.add(new Message(this.ip, this.port, m.getId(), m.getOrigin(), m.getM()));
-        }
-        return message_batch;
+        return this.batch;
     }
 
     public int size() {
         return this.batch.size();
     }
 
-    public String getIp() {
-        return this.ip;
+    public byte getSource() {
+        return this.batch.get(0).getSource();
     }
 
-    public int getPort() {
-        return this.port;
-    }
-
-    public int getId() {
-        return this.batch.get(0).getId();
+    public byte getDest() {
+        return this.batch.get(0).getDest();
     }
 
     public byte[] bytes() {

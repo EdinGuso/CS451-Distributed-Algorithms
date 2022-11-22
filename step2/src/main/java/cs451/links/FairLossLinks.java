@@ -1,7 +1,7 @@
 package cs451.links;
 
 import java.net.DatagramSocket;
-import java.util.List;
+import java.util.HashMap;
 
 import cs451.Host;
 import cs451.udp.UDPServer;
@@ -23,39 +23,52 @@ public class FairLossLinks {
     private UDPClient sender;
     private DatagramSocket socket;
     
-    public FairLossLinks(int port, List<Host> hosts, StubbornLinks sl) {
+    public FairLossLinks(HashMap<Byte, Host> hosts_map, Host self, StubbornLinks sl) {
         try {
-            this.socket = new DatagramSocket(port);
             this.upper_layer = sl;
+            this.socket = new DatagramSocket(self.getPort());
             this.receiver = new UDPServer(this.socket, this);
-            this.sender = new UDPClient(this.socket, hosts);
+            this.sender = new UDPClient(hosts_map, this.socket);
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
+    /*
+     * Forwards the send signal to client.
+     */
     public void send(Message m) {
         this.sender.scheduleMessage(m);
     }
 
+    /*
+     * Forwards the send signal to client. (Ack)
+     */
     public void sendAck(MessageBatch batch) {
         this.sender.scheduleAck(batch);
     }
 
+    /*
+     * Forwards the start signal to server and client.
+     */
     public void start() {
         this.receiver.start();
         this.sender.start();
     }
 
+    /*
+     * Forwards the stop signal to server and client.
+     */
     public void stop_() {
         this.sender.stop_();
-        this.sender.interrupt();
-        try { this.sender.join(); } catch (Exception e) { System.out.println("Main got interrupted while waiting for sender to join."); } //should not happen
+        try { this.sender.join(); } catch (Exception e) { e.printStackTrace(); }
         this.receiver.stop_();
-        //this.receiver.interrupt(); don't send interrupt. it will stop by getting its socket closed
-        try { this.receiver.join(); } catch (Exception e) { System.out.println("Main got interrupted while waiting for receiver to join."); } //should not happen
+        try { this.receiver.join(); } catch (Exception e) { e.printStackTrace(); }
     }
 
+    /*
+     * Forwards the deliver signal to upper layer.
+     */
     public void deliver (MessageBatch batch) {
         this.upper_layer.deliver(batch);
     }

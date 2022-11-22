@@ -1,48 +1,51 @@
 package cs451.util;
 
+import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import cs451.Host;
 import cs451.Constants;
+import cs451.util.SchedulerProcess;
 import cs451.links.StubbornLinks;
 import cs451.message.Message;
 
 /*
  * Implements the scheduler for stubborn links.
  * Allows the stubborn links to schedule messages for
- * retransmissions and to remove messages whose
- * acknowledgements have been delivered.
+ * retransmissions and to removes messages whose
+ * acknowledgements have been delivered. Uses an exponential
+ * backoff algorithm for flow control. Divides the allocated
+ * bandwitdh evenly among destinations.
  */
 public class Scheduler extends Thread {
 
-    private StubbornLinks link;
-    private ConcurrentHashMap<Message, Boolean> map;
+    private ConcurrentHashMap<Byte, SchedulerProcess> map;
+    private HashMap<Byte, Host> hosts_map;
     private AtomicInteger num_acks;
-    private AtomicInteger rate_limiter;
-    private int rate_limiter_local;
-    private int rate_counter;
-    private int sleep_timer;
     private double ratio;
-    private AtomicBoolean need_notification;
+    private int rate_limiter;
+    private int sleep_timer;
     private AtomicBoolean alive;
-    private int capacity;
+    private byte my_id;
     private int count;
     
-    public Scheduler(int num_processes, StubbornLinks link) {
-        this.link = link;
-        this.map = new ConcurrentHashMap<Message, Boolean>();
+    public Scheduler(HashMap<Byte, Host> hosts_map, Host self, StubbornLinks sl) {
+        this.map = new ConcurrentHashMap<Byte, SchedulerProcess>(hosts_map.size());
+        this.hosts_map = hosts_map;
         //params for backoff alg start
-        this.num_acks = new AtomicInteger(Constants.SL_HASHSET_SIZE / (2 * num_processes));
-        this.rate_limiter = new AtomicInteger(Constants.SL_HASHSET_SIZE / num_processes);
-        this.rate_counter = 0;
-        this.sleep_timer = 400;
+        this.num_acks = new AtomicInteger(0);
         this.ratio = 0;
+        this.rate_limiter = Constants.SL_RESEND_LIMIT / 4;
+        this.sleep_timer = 800;
         //params for backoff alg end
-        this.need_notification = new AtomicBoolean(false);
         this.alive = new AtomicBoolean(true);
-        this.capacity = Constants.SL_HASHSET_SIZE;
+        this.my_id = (byte) self.getId();
         this.count = 0;
+        for (Byte dest : hosts_map.keySet()) {
+            this.map.put(dest, new SchedulerProcess(hosts_map, sl));
+        }
     }
 
     public void run() {
@@ -51,32 +54,21 @@ public class Scheduler extends Thread {
                 Thread.sleep(this.sleep_timer);
                 // BACKOFF ALGORITHM START
                 // R = min(1, acks received / attempted sends)
-                this.ratio = Math.min(((double) this.num_acks.getAndSet(0)) / this.rate_limiter.get(), 1); 
-                // sends(t+1) = sends(t) * 0.75 + R * (MAX - 128) * 0.25 + 32; sends(0) = 8192/count(processes); sends = [128, MAX]; where MAX = 8192
-                this.rate_limiter.set(this.rate_limiter.get() * 3 / 4 + ((int) (this.ratio * (Constants.SL_HASHSET_SIZE - 128) / 4)) + 32); 
-                // sleep(t+1) = sleep(t) * 0.75 + (1 - R) * 1800 * 0.25 + 50; sleep(0) = 400; sleep = [200, 2000]
+                this.ratio = Math.min(((double) this.num_acks.getAndSet(0)) / this.rate_limiter, 1); 
+                // sends(t+1) = sends(t) * 0.75 + R * (MAX - 1024) * 0.25 + 256; sends(0) = 16384/count(processes)^2; sends = [1024, MAX]; where MAX = 16384
+                this.rate_limiter = this.rate_limiter * 3 / 4 + ((int) (this.ratio * (Constants.SL_RESEND_LIMIT - 1024) / 4)) + 256; 
+                // sleep(t+1) = sleep(t) * 0.75 + (1 - R) * 1800 * 0.25 + 50; sleep(0) = 800; sleep = [200, 2000]
                 this.sleep_timer = this.sleep_timer * 3 / 4 + (int) ((1.0 - this.ratio) * 450) + 50;
                 // BACKOFF ALGORITHM END
-                // System.out.println("BACKOFF ALG - Ratio: " + this.ratio);
-                // System.out.println("BACKOFF ALG - Rate Limiter: " + this.rate_limiter.get());
-                // System.out.println("BACKOFF ALG - Sleep Timer: " + this.sleep_timer);
-                // System.out.println("Size of the scheduled set = " + this.map.size());
-                this.rate_counter = this.rate_limiter.get();
-                for (Message m : this.map.keySet()) { //for every message that did not receive an acknowledgement
+                for (Byte dest : hosts_map.keySet()) {
                     if (!this.alive.get()) break; //if stop_ still hasn't been called
-                    if (this.rate_counter == 0) break; //if we don't exceded our backoff limit
-                    if (!this.map.replace(m, false, true)) { //if we have passed over this message previously
-                        //System.out.println("Rescheduling Message: (" + m.getIp() + "," + m.getPort() + "," + m.getId() + "," + m.getOrigin() + "," + m.getM() + ")");
-                        this.link.retrySend(m); //send the message to the lower layer
-                        this.rate_counter--;
-                        this.count++;
-                    }
+                    this.count += this.map.get(dest).reSendMessages(this.rate_limiter / this.hosts_map.size(), my_id, dest);
                 }
             }
         } catch (Exception e) {
-            System.out.println("SCHEDULER INTERRUPTED. ID:" + Thread.currentThread().getId());
+            e.printStackTrace();
         } finally {
-            System.out.println("SCHEDULER STOPPED. ID:" + Thread.currentThread().getId());
+            System.out.println("Scheduler thread stopped. ID:" + Thread.currentThread().getId());
             this.map.clear();
             System.out.println("Scheduler hashset stopped and cleared.");
             System.out.println("Rescheduled " + this.count + " many messages");
@@ -84,39 +76,19 @@ public class Scheduler extends Thread {
     }
 
     public void scheduleMessage(Message m) {
-        try {
-            if ((this.map.size() >= this.capacity || this.map.size() >= 2 * this.rate_limiter.get())  && this.alive.get()) { //if we don't have space in the allocated memory (this is used to avoid locking the queue unnecessarily)
-                synchronized(this.map) { //we also use rate_limiter here to signal to the app to not oversend (as it gets stuck here)
-                    while((this.map.size() >= this.capacity || this.map.size() >= 2 * this.rate_limiter.get()) && this.alive.get()) { //while we don't have space in the allocated memory
-                        System.out.println("SCHEDULER BLOCKED FOR: ID-" + Thread.currentThread().getId());
-                        this.need_notification.set(true);
-                        this.map.wait(3000); //wait 3000ms or until notified by scheduler
-                        this.need_notification.set(false);
-                    }
-                }
-            }
-            if (this.map.size() < this.capacity) { //if we have capacity
-                this.map.put(m, false); //add it to the set
-
-            }   
-        } catch (Exception e) {
-            System.out.println("BROADCASTER INTERRUPTED. ID:" + Thread.currentThread().getId());
-        }
+        this.map.get(m.getDest()).scheduleMessage(m.getOrigin(), m.getSeq());
     }
 
     public void acknowledgeMessage(Message m) {
-        if (this.map.containsKey(m)) { //if the message has not been acknowledged before
-            this.map.remove(m); //acknowledge it
+        if (this.map.get(m.getDest()).acknowledgeMessage(m.getOrigin(), m.getSeq())) {
             this.num_acks.getAndIncrement();
-            if (this.need_notification.get() && this.map.size() < this.rate_limiter.get()) { //if main is sleeping and if we need more messages
-                synchronized(this.map) {
-                    this.map.notifyAll(); //notify the scheduler schedulers to wake up
-                }
-            }
-        }
+        }        
     }
 	
 	public void stop_() {
-        this.alive.set(false); //stops us from sending more messages
+        this.alive.set(false);
+        for (Byte dest : hosts_map.keySet()) {
+            this.map.get(dest).stop_();
+        }
 	}
 }

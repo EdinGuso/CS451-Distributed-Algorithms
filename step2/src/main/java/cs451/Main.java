@@ -1,10 +1,10 @@
 package cs451;
 
 import java.util.List;
+import java.util.HashMap;
 import java.nio.file.Paths;
 import java.nio.file.Files;
 
-import cs451.message.MessageZip;
 import cs451.app.Application;
 
 public class Main {
@@ -20,7 +20,7 @@ public class Main {
 
         //stop the app
         if (app != null) app.stop_();
-        else System.out.println("SIGTERM received before initializing beb!");
+        else System.out.println("SIGTERM received before initializing the application!");
     }
 
     private static void initSignalHandlers() {
@@ -70,20 +70,18 @@ public class Main {
         System.out.println("===START OF MY OUTPUT===\n");
 
         //get the necessary parameters from cfg files
-        List<Host> hosts = parser.hosts();
-        String data = "";
-        try {data = new String(Files.readAllBytes(Paths.get(parser.config())));} catch (Exception e) {}
-        int num_messages = Integer.parseInt(data.trim());
+        int num_messages = 0;
+        try {num_messages = Integer.parseInt((new String(Files.readAllBytes(Paths.get(parser.config())))).trim());} catch (Exception e) { e.printStackTrace(); }
 
-        Host self = null;
+        //map the ids to hosts for efficient retrieval of hosts
+        List<Host> hosts = parser.hosts();
+        HashMap<Byte, Host> hosts_map = new HashMap<Byte, Host>();
         for (Host host : hosts) {
-            if (host.getId() == parser.myId()) {
-                self = host;
-            }
+            hosts_map.put((byte) host.getId(), host);
         }
 
         //initialize the app
-        app = new Application(self, hosts, num_messages, parser.output());
+        app = new Application(hosts_map, hosts_map.get((byte) parser.myId()), num_messages, parser.output());
 
         //start the app
         app.start();

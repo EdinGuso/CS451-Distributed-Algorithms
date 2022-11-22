@@ -1,13 +1,12 @@
 package cs451.broadcast;
 
-import java.util.List;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import cs451.Host;
 import cs451.links.PerfectLinks;
 import cs451.message.Message;
-import cs451.message.MessageZip;
+import cs451.message.MessageLocal;
 import cs451.broadcast.UniformReliableBroadcast;
 
 /*
@@ -20,41 +19,54 @@ public class BestEffortBroadcast {
 
     private UniformReliableBroadcast upper_layer;
     private PerfectLinks lower_layer;
-    private List<Host> hosts;
-    private Host self;
-    private int s_count;
-    private int d_count;
+    private HashMap<Byte, Host> hosts_map;
     private AtomicBoolean alive;
+    private int my_id;
 
-    public BestEffortBroadcast(Host host, List<Host> hosts, UniformReliableBroadcast urb) {
+    public BestEffortBroadcast(HashMap<Byte, Host> hosts_map, Host self, UniformReliableBroadcast urb) {
         this.upper_layer = urb;
-        this.lower_layer = new PerfectLinks(host.getId(), host.getPort(), hosts, this);
-        this.hosts = hosts;
-        this.self = host;
+        this.lower_layer = new PerfectLinks(hosts_map, self, this);
+        this.hosts_map = hosts_map;
         this.alive = new AtomicBoolean(true);
+        this.my_id = self.getId();
     }
 
-    public void broadcast(MessageZip m) {
-        for (Host host : hosts) { //we need to send this message to all hosts
+    /*
+     * Appends destination to the messages and forwards the
+     * send signal to lower layer. Prevents from sending messages
+     * to itself.
+     */
+    public void broadcast(MessageLocal ml) {
+        for (Byte dest : hosts_map.keySet()) { //we need to send this message to all hosts
             if (!this.alive.get()) {
                 break;
             }
-            if (host.getId() != this.self.getId()) { //for all hosts other than us
-                this.lower_layer.send(new Message(host.getIp(), host.getPort(), m.getId(), m.getOrigin(), m.getM())); //send using perfect links
+            if (dest != this.my_id) { //for all hosts other than us
+                this.lower_layer.send(new Message(ml, dest)); //send using perfect links
             }
         }
     }
 
+    /*
+     * Forwards the start signal to lower layer.
+     */
     public void start() {
         this.lower_layer.start();
     }
 
+    /*
+     * Prevents future sends. Forwards the stop signal to
+     * lower layer.
+     */
     public void stop_() {
         this.alive.set(false);
         this.lower_layer.stop_();
     }
 
-    public void deliver(MessageZip m) {
-        this.upper_layer.deliver(m);
+    /*
+     * Forwards the deliver signal to upper layer.
+     */
+    public void deliver(MessageLocal ml) {
+        this.upper_layer.deliver(ml);
     }
 }
