@@ -4,8 +4,8 @@ import cs451.message.Message;
 
 /*
  * Message class that does not include dest field.
- * During sending, used from URB to BEB level; during delivering,
- * used from SL to URB level.
+ * During sending, used from APP to BEB level; during delivering,
+ * used from SL to APP level.
  */
 public class MessageLocal {
 

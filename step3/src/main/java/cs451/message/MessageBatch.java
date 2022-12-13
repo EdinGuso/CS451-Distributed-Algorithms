@@ -59,10 +59,6 @@ public class MessageBatch {
     }
 
     public byte[] bytes() {
-        // CONSIDER FIXING THIS!!!!
-        // !!!!
-        // !!!!
-        
         byte[] data = new byte[Constants.UDP_PACKET_SIZE];
         byte[] num_m_byte = ByteBuffer.allocate(4).putInt(this.batch.size()).array(); //turn the number of messages into a byte array
         byte[] m_byte = new byte[Constants.UDP_MESSAGE_SIZE];

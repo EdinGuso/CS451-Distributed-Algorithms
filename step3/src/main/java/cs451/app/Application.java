@@ -1,5 +1,7 @@
 package cs451.app;
 
+import java.util.Arrays;
+
 import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.io.FileReader;
@@ -33,19 +35,21 @@ enum LatticeMessageType {
 }
 
 /*
- * 
+ * Creates BEB and handles multi-shot LA.
  */
 public class Application {
 
-    private ConcurrentHashMap<Integer, LatticeAgreement> ms_la;
     private BestEffortBroadcast lower_layer;
+    private ConcurrentHashMap<Integer, LatticeAgreement> ms_la;
+    private ConcurrentHashMap<Byte, ConcurrentHashMap<Integer, MessageLocal>> la_buffer;
     private ConcurrentHashMap<Integer, String> logs;
     private HashMap<Byte, Host> hosts_map;
     private Host self;
     private int num_proposals;
-    private int num_max_las;
+    private int max_active_las;
     private RangeSet completed_las;
     private int max_deleted_la;
+    private int max_written_la;
     private BufferedReader reader;
     private PrintWriter writer;
     private String config_filename;
@@ -65,19 +69,27 @@ public class Application {
 
         Constants.FLOW_CONTROL.init(hosts_map, (byte) self.getId(), 1000);
 
-        this.ms_la = new ConcurrentHashMap<Integer, LatticeAgreement>(num_proposals);
         this.lower_layer = new BestEffortBroadcast(hosts_map, self, this);
+        this.ms_la = new ConcurrentHashMap<Integer, LatticeAgreement>(num_proposals);
+        this.la_buffer = new ConcurrentHashMap<Byte, ConcurrentHashMap<Integer, MessageLocal>>(hosts_map.size()-1);
         this.logs = new ConcurrentHashMap<Integer, String>(num_proposals);
         this.hosts_map = hosts_map;
         this.self = self;
         this.num_proposals = num_proposals;
-        this.num_max_las = 1; // 128 / hosts_map.size();
+        this.max_active_las = Constants.APP_LOG_SIZE;
         this.completed_las = new RangeSet();
         this.max_deleted_la = 0;
+        this.max_written_la = 0;
         this.config_filename = config_filename;
         this.output_filename = output_filename;
         this.my_id = (byte) self.getId();
         this.alive = new AtomicBoolean(true);
+
+        for (byte source : hosts_map.keySet()) {
+            if (source != this.my_id) {
+                this.la_buffer.put(source, new ConcurrentHashMap<Integer, MessageLocal>());
+            }
+        }
     }
 
     public void setupConstants(int num_processes, int distinct_values) {
@@ -94,14 +106,11 @@ public class Application {
         Constants.HASHMAP_BYTE_RANGESET_SIZE = 16 + (num_processes - 1) * (Constants.RANGESET_CLASS_SIZE + 16); // expected value
         Constants.SCHEDULER_PROCESS_CLASS_SIZE = Integer.MAX_VALUE; // unbounded value
 
-        Constants.APP_QUEUE_SIZE = (int) Math.pow(2,10);
+        Constants.APP_LOG_SIZE = Math.max(1, 10000 / (num_processes * (int)(Math.sqrt(distinct_values))));
         Constants.SL_RESEND_LIMIT = (int) Math.pow(2,14);
-        Constants.UDP_SENDER_QUEUE_SIZE = ((int) Math.pow(2,20)) / Constants.MESSAGE_CLASS_SIZE;
-        Constants.UDP_ACK_QUEUE_SIZE = ((int) Math.pow(2,20)) / Constants.MESSAGE_BATCH_CLASS_SIZE;
-        Constants.UDP_DELIVERER_QUEUE_SIZE = ((int) Math.pow(2,20)) / Constants.UDP_PACKET_SIZE;
-        System.out.println("Constants.UDP_SENDER_QUEUE_SIZE=" + Constants.UDP_SENDER_QUEUE_SIZE);
-        System.out.println("Constants.UDP_ACK_QUEUE_SIZE=" + Constants.UDP_ACK_QUEUE_SIZE);
-        System.out.println("Constants.UDP_DELIVERER_QUEUE_SIZE=" + Constants.UDP_DELIVERER_QUEUE_SIZE);
+        Constants.UDP_SENDER_QUEUE_SIZE = ((int) Math.pow(2,19)) / Constants.MESSAGE_CLASS_SIZE;
+        Constants.UDP_ACK_QUEUE_SIZE = ((int) Math.pow(2,19)) / Constants.MESSAGE_BATCH_CLASS_SIZE;
+        Constants.UDP_DELIVERER_QUEUE_SIZE = ((int) Math.pow(2,21)) / Constants.UDP_PACKET_SIZE;
     }
 
     public byte[] generatePayload(int lattice_number, int proposal_number, LatticeMessageType type, Set<Integer> value) {
@@ -117,7 +126,7 @@ public class Application {
         }
     }
 
-    public void broadcast(int lattice_number, int proposal_number, Set<Integer> value) {
+    public void propose(int lattice_number, int proposal_number, Set<Integer> value) {
         this.lower_layer.broadcast(new MessageLocal(this.my_id, this.generatePayload(lattice_number, proposal_number, LatticeMessageType.PROPOSAL, value)));
     }
 
@@ -132,34 +141,55 @@ public class Application {
     public void decide(int lattice_number, Set<Integer> value) {
         String decision = "";
         for (int v : value) {
-            decision = decision + Integer.toString(v);
+            decision = decision + Integer.toString(v) + " ";
         }
-        this.logs.put(lattice_number, decision);
+        this.logs.put(lattice_number, decision.trim());
         this.completed_las.add(lattice_number);
 
         Constants.FLOW_CONTROL.updateMyInfo(this.completed_las.maxOrdered());
 
         while (this.max_deleted_la < Constants.FLOW_CONTROL.getMin()) {
             this.max_deleted_la++;
+            // System.out.println("Deleting Lattice Agreement No." + this.max_deleted_la);
             this.ms_la.remove(this.max_deleted_la);
+            for (ConcurrentHashMap<Integer, MessageLocal> single_la_buffer : this.la_buffer.values()) {
+                single_la_buffer.remove(this.max_deleted_la);
+            }
         }
 
-        // TO DO
-        // write when necessary
+        if (this.completed_las.maxOrdered() >= this.max_written_la + Constants.APP_LOG_SIZE) {
+            this.write();
+        }
+    }
+
+    public void processBuffer(int i) {
+        for (ConcurrentHashMap<Integer, MessageLocal> single_la_buffer : this.la_buffer.values()) {
+            for (MessageLocal ml : single_la_buffer.values()) {
+                ByteBuffer buf = ByteBuffer.wrap(ml.getM());
+                int lattice_number = buf.getInt();
+                if (lattice_number == i) {
+                    int proposal_number = buf.getInt();
+                    buf.get(); // get the type
+                    Set<Integer> value = new ConcurrentHashMap<Integer, Boolean>().newKeySet();
+                    int num_vs = buf.getInt();
+                    for (int j = 0; j < num_vs; j++) {
+                        value.add(buf.getInt());
+                    }
+                    this.ms_la.get(lattice_number).deliverProposal(proposal_number, value, ml.getSource());
+                }
+            }
+        }
     }
 
     public void start() {
-        this.lower_layer.start(); //start the underlying protocols
+        this.lower_layer.start();
 
-        System.out.println("START");
-        System.out.println(this.num_proposals);
         for (int i = 1; i <= this.num_proposals; i++) {
-            while (i > Constants.FLOW_CONTROL.getMedian() + this.num_max_las && this.alive.get()) {
-                System.out.println("STUCK");
+            while (i > Constants.FLOW_CONTROL.getMedian() + this.max_active_las && this.alive.get()) {
                 try { Thread.sleep(1000); } catch (Exception e) { e.printStackTrace(); }
             }
-            System.out.println("NOT STUCK");
             if (!this.alive.get()) break;
+            // System.out.println("Starting Lattice Agreement No." + i);
 
             String input = "";
             try { input = this.reader.readLine().trim(); } catch (Exception e) { e.printStackTrace(); }
@@ -168,21 +198,17 @@ public class Application {
                 proposal.add(Integer.parseInt(v));
             }
             this.ms_la.put(i, new LatticeAgreement(this.hosts_map, this.self, i, this));
-            this.ms_la.get(i).start();
+            // System.out.println("Checking to see if there are any proposals in buffer:");
+            this.processBuffer(i);
             this.ms_la.get(i).propose(proposal);
         }
-        System.out.println("END START");
     }
 
     public void stop_() {
         this.alive.set(false);
         this.lower_layer.stop_();
-        for (LatticeAgreement la : ms_la.values()) {
-            la.stop_();
-        }
 
-        // TO DO
-        // write remaining
+        this.write();
     }
 
     public void deliver(MessageLocal ml) {
@@ -190,15 +216,9 @@ public class Application {
         int lattice_number = buf.getInt();
         int proposal_number = buf.getInt();
         byte type = buf.get();
-        // System.out.println("Delivered a message from someone");
         if (!this.ms_la.containsKey(lattice_number)) {
-            // System.out.println("The message was rejected");
-            if (type == LatticeMessageType.PROPOSAL.getValue()) {
-                // System.out.println("We sent a nack for rejected message because it was proposal");
-                this.sendNack(lattice_number, proposal_number, new HashSet<Integer>(), ml.getSource());
-            }
-            else {
-                // System.out.println("We did NOT send a nack for rejected message because it was NOT proposal");
+            if (type == LatticeMessageType.PROPOSAL.getValue() && lattice_number > this.max_deleted_la) {
+                this.la_buffer.get(ml.getSource()).put(lattice_number, ml);
             }
             return;
         }
@@ -221,18 +241,21 @@ public class Application {
         }
     }
 
-    // /*
-    //  * Writes the contents of logs into the output file.
-    //  */
-    // public void write() {
-    //     try {
-    //         synchronized (this.logs) { //synchronize since main and deliverer may access concurrently
-    //             this.writer = new PrintWriter(new FileWriter(this.output_filename, true)); //open the file
-    //             while (!this.logs.isEmpty()) { //if there are more messages to be written
-    //                 this.writer.println(this.logs.poll()); //write it
-    //             }
-    //             this.writer.close(); //close the file
-    //         }
-    //     } catch (Exception e) { e.printStackTrace(); }
-    // }
+    /*
+     * Writes the contents of logs into the output file.
+     */
+    public void write() {
+        try {
+            synchronized (this.logs) { //synchronize since main and deliverer may access concurrently
+                int max_ordered = this.completed_las.maxOrdered();
+                this.writer = new PrintWriter(new FileWriter(this.output_filename, true)); //open the file
+                while (this.max_written_la < max_ordered) { //if there are more messages to be written
+                    this.max_written_la++;
+                    String decision = this.logs.remove(this.max_written_la);
+                    this.writer.println(decision); //write it
+                }
+                this.writer.close(); //close the file
+            }
+        } catch (Exception e) { e.printStackTrace(); }
+    }
 }

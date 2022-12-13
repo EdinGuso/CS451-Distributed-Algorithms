@@ -50,7 +50,7 @@ public class Constants {
 
 
     //PROTOCOLS AND THEIR SIZE LIMITATIONS
-    public static int APP_QUEUE_SIZE;
+    public static int APP_LOG_SIZE;
     public static int SL_RESEND_LIMIT;
     public static int UDP_SENDER_QUEUE_SIZE;
     public static int UDP_ACK_QUEUE_SIZE;

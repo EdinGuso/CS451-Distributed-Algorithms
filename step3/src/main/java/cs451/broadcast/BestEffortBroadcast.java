@@ -21,7 +21,7 @@ public class BestEffortBroadcast {
     private Application upper_layer;
     private PerfectLinks lower_layer;
     private HashMap<Byte, Host> hosts_map;
-    private AtomicInteger sequence_number;
+    private HashMap<Byte, AtomicInteger> sequence_numbers;
     private AtomicBoolean alive;
     private int my_id;
 
@@ -29,9 +29,14 @@ public class BestEffortBroadcast {
         this.upper_layer = app;
         this.lower_layer = new PerfectLinks(hosts_map, self, this);
         this.hosts_map = hosts_map;
-        this.sequence_number = new AtomicInteger(0);
+        this.sequence_numbers = new HashMap<Byte, AtomicInteger>(hosts_map.size()-1);
         this.alive = new AtomicBoolean(true);
         this.my_id = (byte) self.getId();
+        for (byte dest : hosts_map.keySet()) {
+            if (dest != this.my_id) {
+                this.sequence_numbers.put(dest, new AtomicInteger(0));
+            }
+        }
     }
 
     /*
@@ -45,7 +50,7 @@ public class BestEffortBroadcast {
                 break;
             }
             if (dest != this.my_id) {
-                this.lower_layer.send(new Message(ml, dest, this.sequence_number.incrementAndGet()));
+                this.lower_layer.send(new Message(ml, dest, this.sequence_numbers.get(dest).incrementAndGet()));
             }
         }
     }
@@ -54,7 +59,7 @@ public class BestEffortBroadcast {
      * 
      */
     public void send(MessageLocal ml, byte dest) {
-        this.lower_layer.send(new Message(ml, dest, this.sequence_number.incrementAndGet()));
+        this.lower_layer.send(new Message(ml, dest, this.sequence_numbers.get(dest).incrementAndGet()));
     }
 
     /*
