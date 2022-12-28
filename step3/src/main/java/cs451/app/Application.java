@@ -189,7 +189,6 @@ public class Application {
                 try { Thread.sleep(1000); } catch (Exception e) { e.printStackTrace(); }
             }
             if (!this.alive.get()) break;
-            // System.out.println("Starting Lattice Agreement No." + i);
 
             String input = "";
             try { input = this.reader.readLine().trim(); } catch (Exception e) { e.printStackTrace(); }
@@ -198,7 +197,6 @@ public class Application {
                 proposal.add(Integer.parseInt(v));
             }
             this.ms_la.put(i, new LatticeAgreement(this.hosts_map, this.self, i, this));
-            // System.out.println("Checking to see if there are any proposals in buffer:");
             this.processBuffer(i);
             this.ms_la.get(i).propose(proposal);
         }

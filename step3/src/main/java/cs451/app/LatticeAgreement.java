@@ -55,7 +55,6 @@ public class LatticeAgreement {
             if (this.ack_count > this.f) {
                 this.active = false;
                 this.app.decide(this.lattice_number, this.proposed_value);
-                // System.out.println("deliverack() : DECIDED (lattice_number=" + this.lattice_number + ") = " + this.proposed_value);
             }
         }
     }

@@ -56,9 +56,6 @@ public class Scheduler extends Thread {
                 // sleep(t+1) = sleep(t) * 0.75 + (1 - R) * 1800 * 0.25 + 50; sleep(0) = 400; sleep = [200, 2000]
                 this.sleep_timer = this.sleep_timer * 3 / 4 + (int) ((1.0 - this.ratio) * 450) + 50;
                 // BACKOFF ALGORITHM END
-                // System.out.println("BACKOFF ALG - Ratio: " + this.ratio);
-                // System.out.println("BACKOFF ALG - Rate Limiter: " + this.rate_limiter.get());
-                // System.out.println("BACKOFF ALG - Sleep Timer: " + this.sleep_timer);
                 this.rate_counter = this.rate_limiter.get();
                 for (Message m : this.map.keySet()) { //for every message that did not receive an acknowledgement
                     if (!this.alive.get()) break; //if stop_ still hasn't been called

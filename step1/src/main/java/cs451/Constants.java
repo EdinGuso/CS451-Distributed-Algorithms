@@ -81,5 +81,4 @@ public class Constants {
 
     // APART FROM THE PERFECT LINKS SUM OF UPPER BOUNDS ON DATA STRUCTURES IS 5,25MB
     // IN THE WORST CASE, NO PROCESS SHOULD CONSUME >10 MB apart from RECEIVER
-    // but they do :( they consume between 30-40MB on average :(
 }

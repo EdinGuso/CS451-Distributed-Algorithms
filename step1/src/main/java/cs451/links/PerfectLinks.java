@@ -56,7 +56,6 @@ public class PerfectLinks {
         if (this.delivered.contains(m_zip)) { //if we have already delivered this message
             return; //do nothing
         }
-        //this.app.deliver(m); //otherwise deliver it
         this.app.deliver(m_zip); //otherwise deliver it //DELETE THIS
         this.delivered.add(m_zip); //and store it so that we don't deliver again
         this.d_count++;
