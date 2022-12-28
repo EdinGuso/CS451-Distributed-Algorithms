@@ -1,0 +1,1 @@
+All the output files including console logs, file logs and error logs will be in this repository.
